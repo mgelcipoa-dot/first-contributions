@@ -1033,7 +1033,7 @@ function categorizePeriodoFat(dtEmissao){
   return 'Final (21-31)';
 }
 function buildLeadTimeAnalysis(){
-  const items=(DATA.pendencias?.items||[]).filter(r=>r.hasNf).map(r=>({
+  const items=(DATA.pendencias?.items||[]).filter(r=>r.hasNf&&(r.sitPed||'').toUpperCase()==='ATENDIDO').map(r=>({
     ...r,
     periodoFat:categorizePeriodoFat(r.dtEmissaoFatStr),
     status_item:norm(r.sitPed)||'—',
