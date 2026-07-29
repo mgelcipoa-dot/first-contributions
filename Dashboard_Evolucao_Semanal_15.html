@@ -1047,7 +1047,7 @@ function buildLeadTimeByMonth(){
   const bySkuCd={};
   const mesesUnicos=new Set();
   atendidos.forEach(r=>{
-    if(!r.dtPed||!r.dtRecebFat)return;
+    if(!r.dtPed||!r.dtAgendFat)return;
     const mesPed=r.dtPed.getFullYear()+'-'+(r.dtPed.getMonth()+1).toString().padStart(2,'0');
     mesesUnicos.add(mesPed);
     const sk=r.codItem+'|'+r.cdPed;
@@ -1056,21 +1056,27 @@ function buildLeadTimeByMonth(){
     bySkuCd[sk].meses[mesPed].items.push(r);
   });
   const mesesOrdenados=[...mesesUnicos].sort();
+  const fmtMesCol=m=>{const [a,b]=m.split('-');const mN=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][parseInt(b)-1];return mN+' '+a;};
   return Object.values(bySkuCd).map(g=>{
     const mesesData={};
+    const mesesDataNum={};
     mesesOrdenados.forEach(mes=>{
       const mesData=g.meses[mes];
       if(mesData){
         const lts=mesData.items.filter(r=>r.ltTotal!==null).map(r=>r.ltTotal);
-        const ltPedEmis=mesData.items.filter(r=>r.ltPedEmissao!==null).map(r=>r.ltPedEmissao);
-        const ltEmisRec=mesData.items.filter(r=>r.ltEmissaoCross!==null).map(r=>r.ltEmissaoCross);
-        const ltMed=lts.length?Math.round(lts.reduce((a,b)=>a+b)/lts.length):0;
-        const ltFat=ltPedEmis.length?Math.round(ltPedEmis.reduce((a,b)=>a+b)/ltPedEmis.length):0;
-        const ltTrans=ltEmisRec.length?Math.round(ltEmisRec.reduce((a,b)=>a+b)/ltEmisRec.length):0;
-        mesesData[mes]=`FT ${ltFat}, T ${ltTrans}, LT ${ltMed}`;
+        const ltEmisRec=mesData.items.filter(r=>r.ltEmissaoCross!==null&&r.ltEmissaoCross>0).map(r=>r.ltEmissaoCross);
+        const ltMed=lts.length?Math.round(lts.reduce((a,b)=>a+b)/lts.length):null;
+        const ltFat=mesData.items.filter(r=>r.ltPedEmissao!==null&&r.ltPedEmissao>0).length?Math.round(mesData.items.filter(r=>r.ltPedEmissao!==null&&r.ltPedEmissao>0).reduce((a,b)=>a+((b.ltPedEmissao||0)),0)/mesData.items.filter(r=>r.ltPedEmissao!==null&&r.ltPedEmissao>0).length):null;
+        const ltTrans=ltEmisRec.length?Math.round(ltEmisRec.reduce((a,b)=>a+b)/ltEmisRec.length):null;
+        const parts=[];
+        if(ltFat!==null&&ltFat>0)parts.push(`Fatur ${ltFat}`);
+        if(ltTrans!==null&&ltTrans>0)parts.push(`Trans ${ltTrans}`);
+        if(ltMed!==null&&ltMed>0)parts.push(`Lt Total ${ltMed}`);
+        mesesData[mes]=parts.length?parts.join(', '):'—';
+        mesesDataNum[mes]=ltMed||0;
       }
     });
-    return{...g,mesesData,mesesOrdenados};
+    return{...g,mesesData,mesesDataNum,mesesOrdenados,fmtMesCol};
   });
 }
 
@@ -1671,14 +1677,25 @@ function renderTable(){
   // RENDERIZAÇÃO CUSTOMIZADA PARA LEADTIMEBYMONTH (pivotado por mês)
   if(VIEW==='leadTimeByMonth'&&list.length){
     const mesesOrdenados=list[0].mesesOrdenados||[];
+    const fmtMesCol=list[0].fmtMesCol||((m)=>m);
     const baseCols=COLS[VIEW]||COLS.prioritaria;
-    const allCols=[...baseCols,...mesesOrdenados.map(m=>({k:'_mes_'+m,l:'% DEF '+m.substring(5),pivot:true}))];
-    $('theadRow').innerHTML=allCols.map(c=>`<th data-col="${c.k}">${c.l}<span class="arr"></span></th>`).join('');
+    const allCols=[...baseCols,...mesesOrdenados.map(m=>({k:'_mes_'+m,l:fmtMesCol(m),pivot:true,mes:m}))];
+    $('theadRow').innerHTML=allCols.map(c=>`<th data-col="${c.k}" style="${c.pivot?'cursor:pointer;':''}"><span style="user-select:none;">${c.l}</span><span class="arr">${SORT.col===c.k?(SORT.dir>0?'▲':'▼'):''}</span></th>`).join('');
+    $('theadRow').querySelectorAll('th').forEach(th=>th.addEventListener('click',()=>{
+      const col=th.dataset.col;if(SORT.col===col)SORT.dir*=-1;else{SORT.col=col;SORT.dir=1;}
+      if(SORT.col.startsWith('_mes_')){
+        const mes=SORT.col.substring(5);
+        list=[...list].sort((a,b)=>{
+          let av=(a.mesesDataNum?.[mes]||0), bv=(b.mesesDataNum?.[mes]||0);
+          return (av-bv)*SORT.dir;
+        });
+      }
+      renderTable();
+    }));
     $('tbodyRows').innerHTML=list.map((r,idx)=>{
       return`<tr>` +allCols.map(c=>{
         if(c.pivot){
-          const mesKey='_mes_'+c.k.substring(5);
-          const v=r.mesesData[c.k.substring(5)]||'—';
+          const v=r.mesesData[c.mes]||'—';
           return`<td style="font-size:11px;text-align:center;color:#666;">${v}</td>`;
         }
         const extra=(c.num||c.pct||c.pct0||c.pp||c.delta||c.age)?'num-cell':(c.cls||'');
