@@ -1082,22 +1082,37 @@ function buildLeadTimeByMonth(){
 
 function buildTendenciaFaturamento(){
   const atendidos=(DATA.pendencias?.items||[]).filter(r=>r.hasNf&&(r.sitPed||'').toUpperCase()==='ATENDIDO');
-  const byFornPeriodo={};
+  const categSemana=d=>{if(!d)return null;const dia=d.getDate();if(dia<=7)return'1ª Semana';if(dia<=14)return'2ª Semana';if(dia<=21)return'3ª Semana';return'4ª Semana';};
+  const byFornMesPeriodo={};
   atendidos.forEach(r=>{
+    if(!r.dtPed||!r.dtEmissaoFatStr)return;
+    const mesPed=r.dtPed.getFullYear()+'-'+(r.dtPed.getMonth()+1).toString().padStart(2,'0');
     const periodo=categorizePeriodoFat(r.dtEmissaoFatStr);
-    const sk=r.descForn+'|'+periodo;
-    if(!byFornPeriodo[sk])byFornPeriodo[sk]={descForn:r.descForn,periodoFat:periodo,items:[]};
-    byFornPeriodo[sk].items.push(r);
+    const semanadoPed=categSemana(r.dtPed);
+    const sk=r.descForn+'|'+mesPed+'|'+periodo;
+    if(!byFornMesPeriodo[sk]){
+      byFornMesPeriodo[sk]={
+        descForn:r.descForn,mesPedido:mesPed,periodoFat:periodo,
+        items:[],distSemana:{},totalByMesForn:0
+      };
+    }
+    byFornMesPeriodo[sk].items.push(r);
+    if(semanadoPed){
+      byFornMesPeriodo[sk].distSemana[semanadoPed]=(byFornMesPeriodo[sk].distSemana[semanadoPed]||0)+1;
+    }
   });
-  const result=Object.values(byFornPeriodo).map(g=>{
+  const result=Object.values(byFornMesPeriodo).map(g=>{
     const lts=g.items.filter(r=>r.ltTotal!==null).map(r=>r.ltTotal);
-    const totalForn=atendidos.filter(r=>r.descForn===g.descForn).length;
-    const pctItens=totalForn>0?(g.items.length/totalForn):0;
+    const totalFornMes=atendidos.filter(r=>r.descForn===g.descForn&&r.dtPed&&r.dtPed.getFullYear()+'-'+(r.dtPed.getMonth()+1).toString().padStart(2,'0')===g.mesPedido).length;
+    const totalItens=g.items.length;
+    const distStr=Object.entries(g.distSemana).map(([sem,cnt])=>`${sem}: ${Math.round(cnt/totalItens*100)}%`).join(' | ');
     return{
       descForn:g.descForn,
+      mesPedido:g.mesPedido,
       periodoFat:g.periodoFat,
-      qtdItens:g.items.length,
-      pctItens:pctItens,
+      qtdItens:totalItens,
+      pctItens:totalFornMes>0?(totalItens/totalFornMes):0,
+      distSemana:distStr,
       ltMedio:lts.length?Math.round(lts.reduce((a,b)=>a+b)/lts.length):null,
       ltMin:lts.length?Math.min(...lts):null,
       ltMax:lts.length?Math.max(...lts):null,
@@ -1551,10 +1566,11 @@ const COLS={
     {k:'descItem',l:'Descrição',cls:'desc-cell'},{k:'descForn',l:'Fornecedor'},
   ],
   tendenciaFaturamento:[
-    {k:'descForn',l:'Fornecedor'},{k:'periodoFat',l:'Período Faturamento',badge:'periodoFat'},
-    {k:'qtdItens',l:'Qtd de Itens',num:true},{k:'pctItens',l:'% do Total',pct:true},
-    {k:'ltMedio',l:'LT Médio (d)',num:true},{k:'ltMin',l:'LT Mín (d)',num:true},
-    {k:'ltMax',l:'LT Máx (d)',num:true},{k:'impactoEstoque',l:'Impacto Estoque',badge:'impactoEstoque'},
+    {k:'descForn',l:'Fornecedor'},{k:'mesPedido',l:'Mês Pedido'},
+    {k:'periodoFat',l:'Período Faturamento',badge:'periodoFat'},
+    {k:'distSemana',l:'Distribuição Semana Pedido',cls:'desc-cell'},
+    {k:'qtdItens',l:'Qtd Itens',num:true},{k:'pctItens',l:'% Mês',pct:true},
+    {k:'ltMedio',l:'LT Médio (d)',num:true},{k:'impactoEstoque',l:'Impacto Estoque',badge:'impactoEstoque'},
   ],
 };
 
