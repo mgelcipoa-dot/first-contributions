@@ -1023,10 +1023,19 @@ function groupBySku(list){
 }
 
 /* ===== LEAD TIME ANALYSIS ===== */
-function categorizePeriodoFat(dtEmissao){
-  if(!dtEmissao || dtEmissao==='-')return '—';
+function categorizePeriodoFat(dtEmissao, dtPedido){
+  if(!dtEmissao || dtEmissao==='-')return 'Não faturado';
   const d=xlDate(dtEmissao);
-  if(!d)return '—';
+  if(!d)return 'Não faturado';
+  // verificar se emissão é de mês diferente do pedido
+  if(dtPedido){
+    const dPed=dtPedido instanceof Date?dtPedido:xlDate(dtPedido);
+    if(dPed){
+      const mesPed=dPed.getFullYear()+'-'+(dPed.getMonth()+1).toString().padStart(2,'0');
+      const mesEmis=d.getFullYear()+'-'+(d.getMonth()+1).toString().padStart(2,'0');
+      if(mesPed!==mesEmis)return 'Excede mês do pedido';
+    }
+  }
   const dia=d.getDate();
   if(dia<=10)return 'Início (1-10)';
   if(dia<=20)return 'Meio (11-20)';
@@ -1035,7 +1044,7 @@ function categorizePeriodoFat(dtEmissao){
 function buildLeadTimeAnalysis(){
   const items=(DATA.pendencias?.items||[]).filter(r=>r.hasNf&&(r.sitPed||'').toUpperCase()==='ATENDIDO').map(r=>({
     ...r,
-    periodoFat:categorizePeriodoFat(r.dtEmissaoFatStr),
+    periodoFat:categorizePeriodoFat(r.dtEmissaoFatStr, r.dtPed),
     status_item:norm(r.sitPed)||'—',
     dtRecebFatStr:fmtDate(r.dtRecebFat)||'—'
   }));
@@ -1088,7 +1097,7 @@ function buildTendenciaFaturamento(){
   atendidos.forEach(r=>{
     if(!r.dtPed||!r.dtEmissaoFatStr)return;
     const mesPed=r.dtPed.getFullYear()+'-'+(r.dtPed.getMonth()+1).toString().padStart(2,'0');
-    const periodo=categorizePeriodoFat(r.dtEmissaoFatStr);
+    const periodo=categorizePeriodoFat(r.dtEmissaoFatStr, r.dtPed);
     const semanadoPed=categSemana(r.dtPed);
     mesesUnicos.add(mesPed);
     const sk=r.descForn+'|'+mesPed+'|'+periodo;
@@ -1668,7 +1677,7 @@ function cellHtml(col,r){
   if(col.badge==='classe'){const m={CRITICO:'b-crit',INVESTIGAR:'b-inv',ACOMPANHAR:'b-acomp',SEMNS:'b-semns',RESOLVIDO:'b-resolv'};return`<span class="badge ${m[r.classe]||'b-estavel'}">${v||'—'}</span>`;}
   if(col.badge==='novotipo')return`<span class="badge ${v==='Novo SKU'?'b-novo-sku':'b-novo-cd'}">${v||'—'}</span>`;
   if(col.badge==='prio'){const m={'1 - CRÍTICA':'p1','2 - ALTA':'p2','3 - NORMAL':'p3','4 - SEM VENDA':'p4'};return`<span class="badge ${m[v]||'p4'}">${v||'—'}</span>`;}
-  if(col.badge==='periodoFat'){const m={'Início (1-10)':'p1','Meio (11-20)':'p2','Final (21-31)':'p3'};return`<span class="badge ${m[v]||'p4'}">${v||'—'}</span>`;}
+  if(col.badge==='periodoFat'){const m={'Início (1-10)':'p1','Meio (11-20)':'p2','Final (21-31)':'p3','Excede mês do pedido':'b-perm','Não faturado':'b-semns'};return`<span class="badge ${m[v]||'p4'}">${v||'—'}</span>`;}
   if(col.badge==='impactoEstoque'){const m={'Risco Alto':'b-crit','Risco Médio':'b-inv','Risco Baixo':'b-resolv'};return`<span class="badge ${m[v]||'b-estavel'}">${v||'—'}</span>`;}
   if(col.badge==='sqlsimnao'){
     if(v===null||v===undefined)return'<span class="muted">—</span>';
