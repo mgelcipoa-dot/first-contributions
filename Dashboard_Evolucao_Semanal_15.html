@@ -1082,13 +1082,15 @@ function buildLeadTimeByMonth(){
 
 function buildTendenciaFaturamento(){
   const atendidos=(DATA.pendencias?.items||[]).filter(r=>r.hasNf&&(r.sitPed||'').toUpperCase()==='ATENDIDO');
-  const categSemana=d=>{if(!d)return null;const dia=d.getDate();if(dia<=7)return'1ª Semana';if(dia<=14)return'2ª Semana';if(dia<=21)return'3ª Semana';return'4ª Semana';};
+  const categSemana=d=>{if(!d)return null;const dia=d.getDate();if(dia<=7)return'1ª';if(dia<=14)return'2ª';if(dia<=21)return'3ª';return'4ª';};
   const byFornMesPeriodo={};
+  const mesesUnicos=new Set();
   atendidos.forEach(r=>{
     if(!r.dtPed||!r.dtEmissaoFatStr)return;
     const mesPed=r.dtPed.getFullYear()+'-'+(r.dtPed.getMonth()+1).toString().padStart(2,'0');
     const periodo=categorizePeriodoFat(r.dtEmissaoFatStr);
     const semanadoPed=categSemana(r.dtPed);
+    mesesUnicos.add(mesPed);
     const sk=r.descForn+'|'+mesPed+'|'+periodo;
     if(!byFornMesPeriodo[sk]){
       byFornMesPeriodo[sk]={
@@ -1101,25 +1103,35 @@ function buildTendenciaFaturamento(){
       byFornMesPeriodo[sk].distSemana[semanadoPed]=(byFornMesPeriodo[sk].distSemana[semanadoPed]||0)+1;
     }
   });
-  const result=Object.values(byFornMesPeriodo).map(g=>{
-    const lts=g.items.filter(r=>r.ltTotal!==null).map(r=>r.ltTotal);
-    const totalFornMes=atendidos.filter(r=>r.descForn===g.descForn&&r.dtPed&&r.dtPed.getFullYear()+'-'+(r.dtPed.getMonth()+1).toString().padStart(2,'0')===g.mesPedido).length;
-    const totalItens=g.items.length;
-    const distStr=Object.entries(g.distSemana).map(([sem,cnt])=>`${sem}: ${Math.round(cnt/totalItens*100)}%`).join(' | ');
-    return{
-      descForn:g.descForn,
-      mesPedido:g.mesPedido,
-      periodoFat:g.periodoFat,
-      qtdItens:totalItens,
-      pctItens:totalFornMes>0?(totalItens/totalFornMes):0,
-      distSemana:distStr,
-      ltMedio:lts.length?Math.round(lts.reduce((a,b)=>a+b)/lts.length):null,
-      ltMin:lts.length?Math.min(...lts):null,
-      ltMax:lts.length?Math.max(...lts):null,
-      impactoEstoque:lts.length&&lts.reduce((a,b)=>a+b)/lts.length>20?'Risco Alto':lts.length&&lts.reduce((a,b)=>a+b)/lts.length>15?'Risco Médio':'Risco Baixo'
-    };
+  const mesesOrdenados=[...mesesUnicos].sort();
+  const fmtMesCol=m=>{const [a,b]=m.split('-');const mN=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][parseInt(b)-1];return mN+' '+a;};
+
+  // Pivotar por fornecedor+período, com meses como colunas
+  const byFornPeriodo={};
+  Object.values(byFornMesPeriodo).forEach(g=>{
+    const sk=g.descForn+'|'+g.periodoFat;
+    if(!byFornPeriodo[sk]){
+      byFornPeriodo[sk]={descForn:g.descForn,periodoFat:g.periodoFat,meses:{}};
+    }
+    byFornPeriodo[sk].meses[g.mesPedido]=g;
   });
-  return result;
+
+  return Object.values(byFornPeriodo).map(g=>{
+    const mesesData={};
+    const mesesDataNum={};
+    mesesOrdenados.forEach(mes=>{
+      const mesData=g.meses[mes];
+      if(mesData){
+        const lts=mesData.items.filter(r=>r.ltTotal!==null).map(r=>r.ltTotal);
+        const totalItens=mesData.items.length;
+        const distStr=Object.entries(mesData.distSemana).map(([sem,cnt])=>`${sem}s: ${Math.round(cnt/totalItens*100)}%`).join(' ');
+        const ltMed=lts.length?Math.round(lts.reduce((a,b)=>a+b)/lts.length):0;
+        mesesData[mes]=`${distStr} | LT ${ltMed}d`;
+        mesesDataNum[mes]=ltMed;
+      }
+    });
+    return{...g,mesesData,mesesDataNum,mesesOrdenados,fmtMesCol};
+  });
 }
 
 /* ===== RENDER ALL ===== */
@@ -1566,11 +1578,7 @@ const COLS={
     {k:'descItem',l:'Descrição',cls:'desc-cell'},{k:'descForn',l:'Fornecedor'},
   ],
   tendenciaFaturamento:[
-    {k:'descForn',l:'Fornecedor'},{k:'mesPedido',l:'Mês Pedido'},
-    {k:'periodoFat',l:'Período Faturamento',badge:'periodoFat'},
-    {k:'distSemana',l:'Distribuição Semana Pedido',cls:'desc-cell'},
-    {k:'qtdItens',l:'Qtd Itens',num:true},{k:'pctItens',l:'% Mês',pct:true},
-    {k:'ltMedio',l:'LT Médio (d)',num:true},{k:'impactoEstoque',l:'Impacto Estoque',badge:'impactoEstoque'},
+    {k:'descForn',l:'Fornecedor'},{k:'periodoFat',l:'Período',badge:'periodoFat'},
   ],
 };
 
@@ -1708,11 +1716,58 @@ function renderTable(){
       }
       renderTable();
     }));
+    // calcular máximo LT por mês para highlighting
+    const maxLtByMes={};
+    mesesOrdenados.forEach(mes=>{
+      const values=list.map(r=>r.mesesDataNum?.[mes]||0).filter(v=>v>0);
+      maxLtByMes[mes]=values.length?Math.max(...values):0;
+    });
     $('tbodyRows').innerHTML=list.map((r,idx)=>{
       return`<tr>` +allCols.map(c=>{
         if(c.pivot){
           const v=r.mesesData[c.mes]||'—';
-          return`<td style="font-size:11px;text-align:center;color:#666;">${v}</td>`;
+          const ltVal=r.mesesDataNum?.[c.mes]||0;
+          const isHigh=ltVal>0&&maxLtByMes[c.mes]>0&&ltVal>=maxLtByMes[c.mes]*0.8;
+          const bgColor=isHigh?'background:#FEF3C7;':';';
+          return`<td style="font-size:11px;text-align:center;color:#666;${bgColor}padding:8px;">${v}</td>`;
+        }
+        const extra=(c.num||c.pct||c.pct0||c.pp||c.delta||c.age)?'num-cell':(c.cls||'');
+        const tt=(c.cls==='desc-cell'||c.cls==='insight-cell')?` title="${String(r[c.k]??'').replace(/"/g,'')}"`:'';;
+        return`<td class="${extra}"${tt}>${cellHtml(c,r)}</td>`;
+      }).join('')+'</tr>';
+    }).join('');
+  } else if(VIEW==='tendenciaFaturamento'&&list.length){
+    // RENDERIZAÇÃO CUSTOMIZADA PARA TENDENCIAFATURAMENTO (pivotado por mês)
+    const mesesOrdenados=list[0].mesesOrdenados||[];
+    const fmtMesCol=list[0].fmtMesCol||((m)=>m);
+    const baseCols=COLS[VIEW]||COLS.prioritaria;
+    const allCols=[...baseCols,...mesesOrdenados.map(m=>({k:'_mes_'+m,l:fmtMesCol(m),pivot:true,mes:m}))];
+    $('theadRow').innerHTML=allCols.map(c=>`<th data-col="${c.k}" style="${c.pivot?'cursor:pointer;':''}"><span style="user-select:none;">${c.l}</span><span class="arr">${SORT.col===c.k?(SORT.dir>0?'▲':'▼'):''}</span></th>`).join('');
+    $('theadRow').querySelectorAll('th').forEach(th=>th.addEventListener('click',()=>{
+      const col=th.dataset.col;if(SORT.col===col)SORT.dir*=-1;else{SORT.col=col;SORT.dir=1;}
+      if(SORT.col.startsWith('_mes_')){
+        const mes=SORT.col.substring(5);
+        list=[...list].sort((a,b)=>{
+          let av=(a.mesesDataNum?.[mes]||0), bv=(b.mesesDataNum?.[mes]||0);
+          return (av-bv)*SORT.dir;
+        });
+      }
+      renderTable();
+    }));
+    // calcular máximo LT por mês para highlighting
+    const maxLtByMes={};
+    mesesOrdenados.forEach(mes=>{
+      const values=list.map(r=>r.mesesDataNum?.[mes]||0).filter(v=>v>0);
+      maxLtByMes[mes]=values.length?Math.max(...values):0;
+    });
+    $('tbodyRows').innerHTML=list.map((r,idx)=>{
+      return`<tr>` +allCols.map(c=>{
+        if(c.pivot){
+          const v=r.mesesData[c.mes]||'—';
+          const ltVal=r.mesesDataNum?.[c.mes]||0;
+          const isHigh=ltVal>0&&maxLtByMes[c.mes]>0&&ltVal>=maxLtByMes[c.mes]*0.8;
+          const bgColor=isHigh?'background:#FEF3C7;':';';
+          return`<td style="font-size:11px;text-align:center;color:#666;${bgColor}padding:8px;line-height:1.4;">${v}</td>`;
         }
         const extra=(c.num||c.pct||c.pct0||c.pp||c.delta||c.age)?'num-cell':(c.cls||'');
         const tt=(c.cls==='desc-cell'||c.cls==='insight-cell')?` title="${String(r[c.k]??'').replace(/"/g,'')}"`:'';;
