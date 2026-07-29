@@ -1044,25 +1044,33 @@ function buildLeadTimeAnalysis(){
 
 function buildLeadTimeByMonth(){
   const atendidos=(DATA.pendencias?.items||[]).filter(r=>r.hasNf&&(r.sitPed||'').toUpperCase()===('ATENDIDO'));
-  const bySkuCdMes={};
+  const bySkuCd={};
+  const mesesUnicos=new Set();
   atendidos.forEach(r=>{
     if(!r.dtPed||!r.dtRecebFat)return;
     const mesPed=r.dtPed.getFullYear()+'-'+(r.dtPed.getMonth()+1).toString().padStart(2,'0');
-    const sk=r.codItem+'|'+r.cdPed+'|'+mesPed;
-    if(!bySkuCdMes[sk])bySkuCdMes[sk]={items:[],codItem:r.codItem,cdPed:r.cdPed,mesPedido:mesPed,descItem:r.descItem,descForn:r.descForn,isCrossLabel:r.isCross?'SIM':'NÃO',sitPed:r.sitPed,venda:null};
-    bySkuCdMes[sk].items.push(r);
+    mesesUnicos.add(mesPed);
+    const sk=r.codItem+'|'+r.cdPed;
+    if(!bySkuCd[sk])bySkuCd[sk]={codItem:r.codItem,cdPed:r.cdPed,descItem:r.descItem,descForn:r.descForn,meses:{}};
+    if(!bySkuCd[sk].meses[mesPed])bySkuCd[sk].meses[mesPed]={items:[]};
+    bySkuCd[sk].meses[mesPed].items.push(r);
   });
-  return Object.values(bySkuCdMes).map(g=>{
-    const lts=g.items.filter(r=>r.ltTotal!==null).map(r=>r.ltTotal);
-    return{
-      ...g,
-      ltTotal:lts.length?Math.round(lts.reduce((a,b)=>a+b)/lts.length):null,
-      ltMin:lts.length?Math.min(...lts):null,
-      ltMax:lts.length?Math.max(...lts):null,
-      qtdAtendida:g.items.length,
-      periodoFat:categorizePeriodoFat(g.items[0]?.dtEmissaoFatStr),
-      venda:g.items[0]?.venda||null
-    };
+  const mesesOrdenados=[...mesesUnicos].sort();
+  return Object.values(bySkuCd).map(g=>{
+    const mesesData={};
+    mesesOrdenados.forEach(mes=>{
+      const mesData=g.meses[mes];
+      if(mesData){
+        const lts=mesData.items.filter(r=>r.ltTotal!==null).map(r=>r.ltTotal);
+        const ltPedEmis=mesData.items.filter(r=>r.ltPedEmissao!==null).map(r=>r.ltPedEmissao);
+        const ltEmisRec=mesData.items.filter(r=>r.ltEmissaoCross!==null).map(r=>r.ltEmissaoCross);
+        const ltMed=lts.length?Math.round(lts.reduce((a,b)=>a+b)/lts.length):0;
+        const ltFat=ltPedEmis.length?Math.round(ltPedEmis.reduce((a,b)=>a+b)/ltPedEmis.length):0;
+        const ltTrans=ltEmisRec.length?Math.round(ltEmisRec.reduce((a,b)=>a+b)/ltEmisRec.length):0;
+        mesesData[mes]=`FT ${ltFat}, T ${ltTrans}, LT ${ltMed}`;
+      }
+    });
+    return{...g,mesesData,mesesOrdenados};
   });
 }
 
@@ -1533,13 +1541,8 @@ const COLS={
     {k:'venda',l:'Venda',num:true},{k:'pct_falta',l:'% Falta',pct:true},
   ],
   leadTimeByMonth:[
-    {k:'codItem',l:'SKU',cls:'sku-cell'},{k:'descItem',l:'Descrição',cls:'desc-cell'},
-    {k:'descForn',l:'Fornecedor'},{k:'cdPed',l:'CD',num:true},
-    {k:'mesPedido',l:'Mês Pedido'},{k:'isCrossLabel',l:'Cross?'},
-    {k:'ltTotal',l:'LT Total (d)',num:true},{k:'ltMin',l:'LT Mín (d)',num:true},
-    {k:'ltMax',l:'LT Máx (d)',num:true},{k:'qtdAtendida',l:'Qtd Atendida',num:true},
-    {k:'periodoFat',l:'Período Faturamento',badge:'periodoFat'},
-    {k:'sitPed',l:'Status'},{k:'venda',l:'Venda',num:true},
+    {k:'codItem',l:'SKU',cls:'sku-cell'},{k:'cdPed',l:'CD',num:true},
+    {k:'descItem',l:'Descrição',cls:'desc-cell'},{k:'descForn',l:'Fornecedor'},
   ],
   tendenciaFaturamento:[
     {k:'descForn',l:'Fornecedor'},{k:'periodoFat',l:'Período Faturamento',badge:'periodoFat'},
@@ -1663,25 +1666,46 @@ function cellHtml(col,r){
 }
 
 function renderTable(){
-  const cols=COLS[VIEW]||COLS.prioritaria;
   const list=getList(VIEW);
   $('rowCnt').textContent=list.length+' linhas';
-  $('theadRow').innerHTML=cols.map(c=>`<th data-col="${c.k}">${c.l}<span class="arr">${SORT.col===c.k?(SORT.dir>0?'▲':'▼'):''}</span></th>`).join('');
-  $('theadRow').querySelectorAll('th').forEach(th=>th.addEventListener('click',()=>{
-    const col=th.dataset.col;if(SORT.col===col)SORT.dir*=-1;else{SORT.col=col;SORT.dir=1;}renderTable();
-  }));
-  $('tbodyRows').innerHTML=list.map((r,idx)=>{
-    let trCls='';
-    if(VIEW==='impactoRede'){
-      if(r._skuGroup){trCls='sku-group-row';if(r._groupFirst)trCls+=' group-first';if(r._groupLast)trCls+=' group-last';}
-      else if(idx>0)trCls='group-sep';
-    }
-    return`<tr${trCls?' class="'+trCls+'"':''}>` +cols.map(c=>{
-      const extra=(c.num||c.pct||c.pct0||c.pp||c.delta||c.age)?'num-cell':(c.cls||'');
-      const tt=(c.cls==='desc-cell'||c.cls==='insight-cell')?` title="${String(r[c.k]??'').replace(/"/g,'')}"`:'';;
-      return`<td class="${extra}"${tt}>${cellHtml(c,r)}</td>`;
-    }).join('')+'</tr>';
-  }).join('');
+  // RENDERIZAÇÃO CUSTOMIZADA PARA LEADTIMEBYMONTH (pivotado por mês)
+  if(VIEW==='leadTimeByMonth'&&list.length){
+    const mesesOrdenados=list[0].mesesOrdenados||[];
+    const baseCols=COLS[VIEW]||COLS.prioritaria;
+    const allCols=[...baseCols,...mesesOrdenados.map(m=>({k:'_mes_'+m,l:'% DEF '+m.substring(5),pivot:true}))];
+    $('theadRow').innerHTML=allCols.map(c=>`<th data-col="${c.k}">${c.l}<span class="arr"></span></th>`).join('');
+    $('tbodyRows').innerHTML=list.map((r,idx)=>{
+      return`<tr>` +allCols.map(c=>{
+        if(c.pivot){
+          const mesKey='_mes_'+c.k.substring(5);
+          const v=r.mesesData[c.k.substring(5)]||'—';
+          return`<td style="font-size:11px;text-align:center;color:#666;">${v}</td>`;
+        }
+        const extra=(c.num||c.pct||c.pct0||c.pp||c.delta||c.age)?'num-cell':(c.cls||'');
+        const tt=(c.cls==='desc-cell'||c.cls==='insight-cell')?` title="${String(r[c.k]??'').replace(/"/g,'')}"`:'';;
+        return`<td class="${extra}"${tt}>${cellHtml(c,r)}</td>`;
+      }).join('')+'</tr>';
+    }).join('');
+  } else {
+    // RENDERIZAÇÃO PADRÃO
+    const cols=COLS[VIEW]||COLS.prioritaria;
+    $('theadRow').innerHTML=cols.map(c=>`<th data-col="${c.k}">${c.l}<span class="arr">${SORT.col===c.k?(SORT.dir>0?'▲':'▼'):''}</span></th>`).join('');
+    $('theadRow').querySelectorAll('th').forEach(th=>th.addEventListener('click',()=>{
+      const col=th.dataset.col;if(SORT.col===col)SORT.dir*=-1;else{SORT.col=col;SORT.dir=1;}renderTable();
+    }));
+    $('tbodyRows').innerHTML=list.map((r,idx)=>{
+      let trCls='';
+      if(VIEW==='impactoRede'){
+        if(r._skuGroup){trCls='sku-group-row';if(r._groupFirst)trCls+=' group-first';if(r._groupLast)trCls+=' group-last';}
+        else if(idx>0)trCls='group-sep';
+      }
+      return`<tr${trCls?' class="'+trCls+'"':''}>` +cols.map(c=>{
+        const extra=(c.num||c.pct||c.pct0||c.pp||c.delta||c.age)?'num-cell':(c.cls||'');
+        const tt=(c.cls==='desc-cell'||c.cls==='insight-cell')?` title="${String(r[c.k]??'').replace(/"/g,'')}"`:'';;
+        return`<td class="${extra}"${tt}>${cellHtml(c,r)}</td>`;
+      }).join('')+'</tr>';
+    }).join('');
+  }
   // show/hide filter controls per view
   const showFilters=['fSit','fClasse','fPrio','fTend','fProblema','fForn','fCurva','fStatus'];
   const hidePerView={
