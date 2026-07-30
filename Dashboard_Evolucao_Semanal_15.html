@@ -978,7 +978,7 @@ function recompute(){
   // Classificar status de resolução dos NOVOS
   const pendsMap={};
   (DATA.pendencias?.items||[]).forEach(pd=>{
-    const k=pd.sku+'_'+pd.cdPed;
+    const k=pd.codItem+'_'+pd.cdPed;
     if(!pendsMap[k])pendsMap[k]=[];
     pendsMap[k].push(pd);
   });
@@ -988,9 +988,9 @@ function recompute(){
       const pends=pendsMap[k]||[];
       const temNf=pends.some(pd=>pd.hasNf);
       const temAgenda=pends.some(pd=>pd.dtAgendFatStr&&pd.dtAgendFatStr!=='-');
-      if(temNf||temAgenda)r.novoStatusResolucao='Resolvido';
-      else if(pends.some(pd=>(pd.sitPed||'').toUpperCase()==='PENDENTE'))r.novoStatusResolucao='Em andamento';
-      else r.novoStatusResolucao='Pendente';
+      if(temNf||temAgenda)r.novoStatusResolucao='Em andamento';
+      else if(pends.some(pd=>(pd.sitPed||'').toUpperCase()==='PENDENTE'))r.novoStatusResolucao='Pendente';
+      else r.novoStatusResolucao='Resolvido';
     }
   });
   RECORDS.forEach(r=>classify(r,p));
