@@ -809,6 +809,7 @@ function classify(r,p){
     const maisProxima=futuras.sort((a,b)=>a.dtEntregaFinal-b.dtEntregaFinal)[0];
     r.pendAgendaStr=maisProxima?fmtDate(maisProxima.dtEntregaFinal):'';
     r.pendNfStr=pends.filter(p=>p.hasNf).map(p=>p.nfFat).filter((v,i,a)=>a.indexOf(v)===i).join(', ');
+    r.pendEmissaoStr=pends.filter(p=>p.hasNf&&p.dtEmissaoFatStr).map(p=>p.dtEmissaoFatStr).filter((v,i,a)=>a.indexOf(v)===i).join(', ');
     r.pendQtdTotal=pends.reduce((s,p)=>s+(p.qtdPendente||0),0);
     r.pendSemNf=pends.filter(p=>!p.hasNf).length;
     r.pendComNfSemAg=pends.filter(p=>p.hasNf&&!p.hasAgenda).length;
@@ -819,8 +820,14 @@ function classify(r,p){
       r.dataAgendDate=maisProxima?maisProxima.dtEntregaFinal:null;
       r.agendaVencida=r.dataAgendDate?(r.dataAgendDate<new Date(new Date().setHours(0,0,0,0))?'SIM':'NÃO'):null;
     }
+    // se DEF diz "sem NF" mas PENDÊNCIAS tem NF associada, PENDÊNCIAS prevalece
+    const nfDefVazia=!r.nf||r.nf==='-'||/sem\s*nf/i.test(r.nf);
+    if(nfDefVazia&&r.pendNfStr){
+      r.nf=r.pendNfStr;
+      r.emissaoNf=r.pendEmissaoStr||r.emissaoNf;
+    }
   } else {
-    r.pendAgendaStr='';r.pendNfStr='';r.pendQtdTotal=null;r.pendSemNf=0;r.pendComNfSemAg=0;r.pendNoCd=false;
+    r.pendAgendaStr='';r.pendNfStr='';r.pendEmissaoStr='';r.pendQtdTotal=null;r.pendSemNf=0;r.pendComNfSemAg=0;r.pendNoCd=false;
   }
 
   // ---- fechamento semanal (SQL) — fonte principal de lojas/cobertura ----
