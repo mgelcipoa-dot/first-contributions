@@ -826,6 +826,17 @@ function classify(r,p){
       r.nf=r.pendNfStr;
       r.emissaoNf=r.pendEmissaoStr||r.emissaoNf;
     }
+    // recalcular ALERTA com base no status real das pendências (fonte de verdade),
+    // pois o texto do arquivo DEF é estático e pode contradizer as NFs já emitidas
+    const totalPend=pends.length, comNf=pends.filter(p=>p.hasNf).length, semNf=totalPend-comNf;
+    const comAgenda=pends.filter(p=>p.hasNf&&p.hasAgenda).length;
+    if(semNf===0){
+      r.alerta=comAgenda===totalPend?'NF EMITIDA — AGENDADA':'NF EMITIDA — AGUARDANDO AGENDA';
+    } else if(comNf===0){
+      r.alerta='SEM NF — COBRAR FORNECEDOR';
+    } else {
+      r.alerta=`PARCIAL — ${comNf} NF(s) emitida(s), ${semNf} pendente(s) sem NF`;
+    }
   } else {
     r.pendAgendaStr='';r.pendNfStr='';r.pendEmissaoStr='';r.pendQtdTotal=null;r.pendSemNf=0;r.pendComNfSemAg=0;r.pendNoCd=false;
   }
