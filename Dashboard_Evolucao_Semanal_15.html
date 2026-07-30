@@ -717,7 +717,14 @@ function parsePendencias(matrix){
     const dtEmissaoTransf=xlDate(g(row,'dtEmissaoTransf'));
     const dtAgendTransf=xlDate(g(row,'dtAgendTransf'));
     const dtRecebFat=xlDate(g(row,'dtRecebFat'));
-    const hasNf=!isBlank(g(row,'nfFat'));
+    // "Qtd Pendente Não Faturada": se >0, a Quantidade Pendente desta linha ainda não
+    // foi faturada de fato — a NF/Romaneio/Recebimento que aparecem na linha podem ser
+    // de uma entrega PARCIAL anterior do mesmo pedido (ex.: pedido de 450, já recebeu
+    // 400 com NF X, mas as 50 restantes seguem sem NF). Por isso, só consideramos a
+    // NF/agenda/romaneio "válidas" para a pendência quando não sobra saldo sem faturar.
+    const qtdPendNaoFatVal=toN(g(row,'qtdPendNaoFat'));
+    const saldoTotalmenteFaturado=!(qtdPendNaoFatVal>0);
+    const hasNf=!isBlank(g(row,'nfFat'))&&saldoTotalmenteFaturado;
     const hasAgenda=dtAgendFat!==null;
     const hasAgendaTransf=dtAgendTransf!==null;
     // lead times
@@ -746,7 +753,10 @@ function parsePendencias(matrix){
     const romaneioFat=hasRomaneioFat?String(g(row,'romaneioFat')).trim():'';
     const hasRomaneioTransf=!isBlank(g(row,'romaneioTransf'));
     const romaneioTransf=hasRomaneioTransf?String(g(row,'romaneioTransf')).trim():'';
-    const chegouCd=isCross?(hasRomaneioTransf&&hasRecebTransf):(hasRomaneioFat&&dtRecebFat!==null);
+    // só considera "chegou" quando não há saldo pendente sem faturar — caso contrário
+    // o romaneio/recebimento desta linha pertence a uma entrega PARCIAL anterior, não
+    // à quantidade que ainda está em aberto
+    const chegouCd=saldoTotalmenteFaturado&&(isCross?(hasRomaneioTransf&&hasRecebTransf):(hasRomaneioFat&&dtRecebFat!==null));
     const dtChegadaCd=chegouCd?(isCross?dtRecebTransf:dtRecebFat):null;
     const romaneioNum=chegouCd?(isCross?romaneioTransf:romaneioFat):'';
     let cobrarForn=false, cobrarCd=false, cobraMotivo='';
