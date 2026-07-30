@@ -1627,13 +1627,28 @@ function getList(view){
   const mf=(arr,v)=>arr.length===0||arr.includes(v); // multi-filter: empty = all pass
   let base;
   if(view==='cobranca'){
-    base=(DATA.pendencias?.items||[]).filter(r=>r.cobrarForn&&(r.sitPed||'').toUpperCase()==='PENDENTE').map(r=>({
-      ...r,isCrossLabel:r.isCross?'SIM — 1007':'NÃO'}));
+    base=(DATA.pendencias?.items||[]).filter(r=>r.cobrarForn&&(r.sitPed||'').toUpperCase()==='PENDENTE').map(r=>{
+      // Se tem agenda marcada, deve ter NF associada
+      const fixed={...r,isCrossLabel:r.isCross?'SIM — 1007':'NÃO'};
+      if(r.dtAgendFat&&!r.nfFat){
+        // Agenda foi marcada, buscar NF mais próxima
+        if(r.hasNf)fixed.nfFat=String(r.nfFat||'').trim()||'—';
+        else fixed.nfFat='Agendado (aguardando NF)';
+      }
+      return fixed;
+    });
     return applyPendFilter(base,q,fs);
   }
   if(view==='cobrancaCd'){
-    base=(DATA.pendencias?.items||[]).filter(r=>r.cobrarCd&&(r.sitPed||'').toUpperCase()==='PENDENTE').map(r=>({
-      ...r,isCrossLabel:'SIM — 1007'}));
+    base=(DATA.pendencias?.items||[]).filter(r=>r.cobrarCd&&(r.sitPed||'').toUpperCase()==='PENDENTE').map(r=>{
+      // Se tem agenda marcada, deve ter NF associada
+      const fixed={...r,isCrossLabel:'SIM — 1007'};
+      if(r.dtAgendFat&&!r.nfFat){
+        if(r.hasNf)fixed.nfFat=String(r.nfFat||'').trim()||'—';
+        else fixed.nfFat='Agendado (aguardando NF)';
+      }
+      return fixed;
+    });
     return applyPendFilter(base,q,fs);
   }
   if(view==='leadtime'){
