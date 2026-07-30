@@ -975,24 +975,6 @@ function recompute(){
       grupoOrForn:r.grupo||r.forn,novo_tipo:null});
   });
   const p=P();
-  // Classificar status de resolução dos NOVOS
-  const pendsMap={};
-  (DATA.pendencias?.items||[]).forEach(pd=>{
-    const k=pd.codItem+'_'+pd.cdPed;
-    if(!pendsMap[k])pendsMap[k]=[];
-    pendsMap[k].push(pd);
-  });
-  RECORDS.forEach(r=>{
-    if(r.situacao==='NOVO'){
-      const k=r.sku+'_'+r.cd;
-      const pends=pendsMap[k]||[];
-      const temNf=pends.some(pd=>pd.hasNf);
-      const temAgenda=pends.some(pd=>pd.dtAgendFatStr&&pd.dtAgendFatStr!=='-');
-      if(temNf||temAgenda)r.novoStatusResolucao='Em andamento';
-      else if(pends.some(pd=>(pd.sitPed||'').toUpperCase()==='PENDENTE'))r.novoStatusResolucao='Pendente';
-      else r.novoStatusResolucao='Resolvido';
-    }
-  });
   RECORDS.forEach(r=>classify(r,p));
   rankImpact();
   ORDERS=buildOrders(p);
@@ -1284,29 +1266,6 @@ function renderRemanescentes(){
   $('remNote').textContent='O remanescente é a linha que já existia na semana anterior e continua na semana atual. Aqui o foco é comparar falta em loja, quantidade do pedido e agenda.';
 }
 
-/* ===== CATEGORIZAR NOVOS ===== */
-function categorizarNovos(){
-  const novos=RECORDS.filter(r=>r.situacao==='NOVO');
-  const pendsMap={};
-  (DATA.pendencias?.items||[]).forEach(p=>{
-    const k=p.sku+'_'+p.cdPed;
-    if(!pendsMap[k])pendsMap[k]=[];
-    pendsMap[k].push(p);
-  });
-  const categorizado={total:novos.length,resolvido:0,processamento:0,genuinosPendentes:0};
-  novos.forEach(novo=>{
-    const k=novo.sku+'_'+novo.cd;
-    const pends=pendsMap[k]||[];
-    const temNf=pends.some(p=>p.hasNf);
-    const temAgenda=pends.some(p=>p.dtAgendFatStr&&p.dtAgendFatStr!=='-');
-    const emProcesso=pends.some(p=>(p.sitPed||'').toUpperCase()==='PENDENTE'&&!temNf&&!temAgenda);
-    if(temNf||temAgenda)categorizado.resolvido++;
-    else if(emProcesso)categorizado.processamento++;
-    else categorizado.genuinosPendentes++;
-  });
-  return categorizado;
-}
-
 /* ===== KPIs ===== */
 function kpiHtml(lbl,num,sub,cls){
   return`<div class="kpi ${cls}"><div class="lbl">${lbl}</div><div class="num">${num}</div>${sub?`<div class="sub">${sub}</div>`:''}</div>`;
@@ -1318,11 +1277,9 @@ function renderKPIs(){
   const fvA=avg(act.map(r=>r.pct_falta).filter(v=>v!==null));
   const fvP=avg(DATA.prv.map(r=>r.pct_falta).filter(v=>v!==null));
   const vp=fvA!==null&&fvP!==null?(fvA-fvP)*100:null;
-  const novosInfo=categorizarNovos();
-  const pctResolvido=(novosInfo.total>0?(novosInfo.resolvido/novosInfo.total*100).toFixed(0):'0')+'%';
   $('kpiRow1').innerHTML=[
     kpiHtml('EM FALTA — ATUAL',act.length,'ant: '+DATA.prv.length,'kpi blue'),
-    kpiHtml('NOVOS EM FALTA',novosInfo.total,novosInfo.resolvido+' resolvidos ('+pctResolvido+')','kpi red'),
+    kpiHtml('NOVOS EM FALTA',RECORDS.filter(r=>r.situacao==='NOVO').length,'','kpi red'),
     kpiHtml('PERMANECEM',RECORDS.filter(r=>r.situacao==='PERMANECE').length,'','kpi amber'),
     kpiHtml('RESOLVIDOS',RECORDS.filter(r=>r.situacao==='RESOLVIDO').length,'','kpi green'),
     kpiHtml('CRÍTICOS — DESCONTINUAÇÃO',n('CRITICO'),fmtP(avg(act.filter(r=>r.classe==='CRITICO').map(r=>r.pct_falta).filter(v=>v!==null)))+' falta varejo','kpi red'),
@@ -1490,7 +1447,7 @@ const COLS={
   novos:[
     {k:'sku',l:'SKU',cls:'sku-cell'},{k:'desc',l:'Descrição',cls:'desc-cell'},
     {k:'grupoOrForn',l:'Grupo fornecedor'},{k:'cd',l:'CD',num:true},{k:'novo_tipo',l:'Tipo novo',badge:'novotipo'},
-    {k:'novoStatusResolucao',l:'Status Resolução',badge:'novoResolucao'},{k:'status',l:'Status pedido',badge:'status'},{k:'problema',l:'Problema'},
+    {k:'status',l:'Status pedido',badge:'status'},{k:'problema',l:'Problema'},
     {k:'pend',l:'Pend tot',num:true},{k:'qtd_ag',l:'Qtd agendada',num:true},
     {k:'dataAgend',l:'Data agenda'},{k:'agendaVencida',l:'Agenda vencida',badge:'sqlsimnao'},
     {k:'nf',l:'NF'},{k:'emissaoNf',l:'Emissão NF'},{k:'alerta',l:'Alerta NF/agenda'},
@@ -1719,9 +1676,8 @@ function cellHtml(col,r){
   if(col.badge==='status')return statusBadge(v);
   if(col.badge==='classe'){const m={CRITICO:'b-crit',INVESTIGAR:'b-inv',ACOMPANHAR:'b-acomp',SEMNS:'b-semns',RESOLVIDO:'b-resolv'};return`<span class="badge ${m[r.classe]||'b-estavel'}">${v||'—'}</span>`;}
   if(col.badge==='novotipo')return`<span class="badge ${v==='Novo SKU'?'b-novo-sku':'b-novo-cd'}">${v||'—'}</span>`;
-  if(col.badge==='novoResolucao'){const m={'Resolvido':'b-resolv','Em andamento':'b-inv','Pendente':'b-crit'};return`<span class="badge ${m[v]||'b-estavel'}">${v||'—'}</span>`;}
   if(col.badge==='prio'){const m={'1 - CRÍTICA':'p1','2 - ALTA':'p2','3 - NORMAL':'p3','4 - SEM VENDA':'p4'};return`<span class="badge ${m[v]||'p4'}">${v||'—'}</span>`;}
-  if(col.badge==='periodoFat'){const m={'Início (1-10)':'p1','Meio (11-20)':'p2','Final (21-31)':'p3','Excede mês do pedido':'b-perm','Não faturado':'b-semns'};return`<span class="badge ${m[v]||'p4'}`>${v||'—'}</span>`;}
+  if(col.badge==='periodoFat'){const m={'Início (1-10)':'p1','Meio (11-20)':'p2','Final (21-31)':'p3','Excede mês do pedido':'b-perm','Não faturado':'b-semns'};return`<span class="badge ${m[v]||'p4'}">${v||'—'}</span>`;}
   if(col.badge==='impactoEstoque'){const m={'Risco Alto':'b-crit','Risco Médio':'b-inv','Risco Baixo':'b-resolv'};return`<span class="badge ${m[v]||'b-estavel'}">${v||'—'}</span>`;}
   if(col.badge==='sqlsimnao'){
     if(v===null||v===undefined)return'<span class="muted">—</span>';
