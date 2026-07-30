@@ -802,7 +802,10 @@ function classify(r,p){
   r.agendaVencida=r.dataAgendDate?(r.dataAgendDate<new Date(new Date().setHours(0,0,0,0))?'SIM':'NÃO'):null;
 
   // ---- enriquecer com PENDENCIAS (melhor fonte de agenda e NFs) ----
-  const pends=DATA.pendencias?.byKey?.[r.key]||[];
+  // IMPORTANTE: esta análise (cobrança/prioridade/agenda) só considera itens com
+  // situação PENDENTE. ATENDIDO/CANCELADO não entram aqui — ATENDIDO é usado
+  // exclusivamente nas abas de Lead Time.
+  const pends=(DATA.pendencias?.byKey?.[r.key]||[]).filter(p=>(p.sitPed||'').toUpperCase()==='PENDENTE');
   if(pends.length){
     // pega a entrega mais próxima (futura) como previsão
     const futuras=pends.filter(p=>p.dtEntregaFinal&&p.dtEntregaFinal>=new Date(new Date().setHours(0,0,0,0)));
@@ -1165,8 +1168,11 @@ function buildTendenciaFaturamento(){
 /* ===== CLASSIFICAR NOVOS POR STATUS DE RESOLUÇÃO ===== */
 function classificarNovosStatus(){
   try{
+    // Só considera itens com situação PENDENTE — ATENDIDO/CANCELADO não contam
+    // aqui (ATENDIDO é exclusivo das abas de Lead Time).
     const pendsMap={};
     (DATA.pendencias?.items||[]).forEach(pd=>{
+      if((pd.sitPed||'').toUpperCase()!=='PENDENTE')return;
       const k=pd.codItem+'_'+pd.cdPed;
       if(!pendsMap[k])pendsMap[k]=[];
       pendsMap[k].push(pd);
@@ -1175,11 +1181,10 @@ function classificarNovosStatus(){
       if(r.situacao==='NOVO'){
         const k=r.sku+'_'+r.cd;
         const pends=pendsMap[k]||[];
+        if(!pends.length){r.novoStatusResolucao='Resolvido';return;}
         const temNf=pends.some(pd=>pd.hasNf);
         const temAgenda=pends.some(pd=>pd.hasAgenda);
-        if(temNf||temAgenda)r.novoStatusResolucao='Em andamento';
-        else if(pends.some(pd=>(pd.sitPed||'').toUpperCase()==='PENDENTE'))r.novoStatusResolucao='Pendente';
-        else r.novoStatusResolucao='Resolvido';
+        r.novoStatusResolucao=(temNf||temAgenda)?'Em andamento':'Pendente';
       }
     });
   }catch(e){
