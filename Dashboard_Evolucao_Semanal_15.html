@@ -694,11 +694,13 @@ function parsePendencias(matrix){
     ticketFat:fi(['Ticket Entrega Faturamento']),
     dtProgFat:fi(['Data Programação Faturam']),dtDesejFat:fi(['Data Desejada Faturamento']),
     dtAgendFat:fi(['Data Agendamento Faturam']),dtRecebFat:fi(['Data Recebimento Faturamento']),
+    romaneioFat:fi(['Romaneio Faturamento']),
     qtdAssocTransf:fi(['Qtd Associada Transferência']),
     nfTransf:fi(['Nota Fiscal Transferência']),dtEmissaoTransf:fi(['Data Emissão Transferência']),
     ticketTransf:fi(['Ticket Entrega Transferência']),
     dtProgTransf:fi(['Data Programação Transf']),dtDesejTransf:fi(['Data Desejada Transferência']),
     dtAgendTransf:fi(['Data Agendamento Transf']),dtRecebTransf:fi(['Data Recebimento Transferência']),
+    romaneioTransf:fi(['Romaneio Transferência']),
   };
   const g=(row,k)=>C[k]>=0?row[C[k]]:null;
   const items=[];
@@ -736,6 +738,17 @@ function parsePendencias(matrix){
     const hasNfTransf=!isBlank(g(row,'nfTransf'));
     const dtRecebTransf=xlDate(g(row,'dtRecebTransf'));
     const hasRecebTransf=dtRecebTransf!==null;
+    // Romaneio = comprovante de que a mercadoria chegou fisicamente no CD e está
+    // em conferência/liberação. Faturamento (sem cross) usa Romaneio Faturamento +
+    // Data Recebimento Faturamento; Transferência (cross) usa Romaneio Transferência
+    // + Data Recebimento Transferência.
+    const hasRomaneioFat=!isBlank(g(row,'romaneioFat'));
+    const romaneioFat=hasRomaneioFat?String(g(row,'romaneioFat')).trim():'';
+    const hasRomaneioTransf=!isBlank(g(row,'romaneioTransf'));
+    const romaneioTransf=hasRomaneioTransf?String(g(row,'romaneioTransf')).trim():'';
+    const chegouCd=isCross?(hasRomaneioTransf&&hasRecebTransf):(hasRomaneioFat&&dtRecebFat!==null);
+    const dtChegadaCd=chegouCd?(isCross?dtRecebTransf:dtRecebFat):null;
+    const romaneioNum=chegouCd?(isCross?romaneioTransf:romaneioFat):'';
     let cobrarForn=false, cobrarCd=false, cobraMotivo='';
     if(isCross){
       if(!hasNf){
@@ -746,12 +759,16 @@ function parsePendencias(matrix){
         if(!hasNfTransf) cobraMotivo='Cross recebido, sem NF de transferência — cobrar CD 1007 → CD '+cdPed;
         else if(!hasAgendaTransf) cobraMotivo='NF transf. emitida, sem agenda transf. — cobrar agendamento CD '+cdPed;
         else cobraMotivo='Agenda transf. prevista '+fmtDate(dtAgendTransf)+' — aguardando recebimento no CD '+cdPed;
+      } else if(chegouCd){
+        cobraMotivo='Mercadoria recebida no CD '+cdPed+' (Romaneio '+romaneioTransf+') — em conferência/liberação';
       }
     } else {
       if(!hasNf){
         cobrarForn=true; cobraMotivo='Sem NF — solicitar faturamento';
       } else if(hasNf&&!hasAgenda&&!dtRecebFat){
         cobrarForn=true; cobraMotivo='Com NF sem agenda — solicitar agendamento';
+      } else if(chegouCd){
+        cobraMotivo='Mercadoria recebida no CD '+cdPed+' (Romaneio '+romaneioFat+') — em conferência/liberação';
       }
     }
     items.push({
@@ -767,12 +784,16 @@ function parsePendencias(matrix){
       nfTransf:hasNfTransf?String(g(row,'nfTransf')):'',
       dtEmissaoTransf,dtAgendTransf,dtRecebTransf,hasRecebTransf,
       hasNf,hasAgenda,hasAgendaTransf,hasNfTransf,
+      romaneioFat,hasRomaneioFat,romaneioTransf,hasRomaneioTransf,
+      chegouCd,dtChegadaCd,romaneioNum,
+      dtChegadaCdStr:fmtDate(dtChegadaCd)||'—',
       ltPedEmissao,ltEmissaoCross,ltCrossFinal,ltTotal,
       dtEntregaFinal,cobrarForn,cobrarCd,cobraMotivo,
       dtPedStr:fmtDate(dtPed),dtEmissaoFatStr:fmtDate(dtEmissaoFat),
       dtAgendFatStr:fmtDate(dtAgendFat),dtAgendTransfStr:fmtDate(dtAgendTransf),
       dtEmissaoTransfStr:fmtDate(dtEmissaoTransf),
       dtEntregaFinalStr:fmtDate(dtEntregaFinal),
+      dtRecebFatStr:fmtDate(dtRecebFat)||'—',dtRecebTransfStr:fmtDate(dtRecebTransf)||'—',
     });
   }
   // build lookup by SKU|CD
@@ -817,6 +838,13 @@ function classify(r,p){
     r.pendSemNf=pends.filter(p=>!p.hasNf).length;
     r.pendComNfSemAg=pends.filter(p=>p.hasNf&&!p.hasAgenda).length;
     r.pendNoCd=pends.some(p=>p.hasNf&&p.hasAgenda);
+    // mercadoria já chegou fisicamente no CD (Romaneio + Data Recebimento) e está
+    // em conferência/liberação — ainda PENDENTE no sistema, mas não é mais cobrança
+    r.pendChegaramCd=pends.filter(p=>p.chegouCd).length;
+    r.pendChegouCd=r.pendChegaramCd>0;
+    r.pendChegouCdLabel=r.pendChegouCd?'SIM':'NÃO';
+    r.pendChegadaStr=pends.filter(p=>p.chegouCd).map(p=>p.dtChegadaCdStr).filter(v=>v&&v!=='—').filter((v,i,a)=>a.indexOf(v)===i).join(', ');
+    r.pendRomaneioStr=pends.filter(p=>p.chegouCd).map(p=>p.romaneioNum).filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).join(', ');
     // fallback de dataAgend se não veio da DEF
     if(!r.dataAgend||r.dataAgend==='-'){
       r.dataAgend=r.pendAgendaStr||'';
@@ -833,15 +861,21 @@ function classify(r,p){
     // pois o texto do arquivo DEF é estático e pode contradizer as NFs já emitidas
     const totalPend=pends.length, comNf=pends.filter(p=>p.hasNf).length, semNf=totalPend-comNf;
     const comAgenda=pends.filter(p=>p.hasNf&&p.hasAgenda).length;
-    if(semNf===0){
+    const chegaram=r.pendChegaramCd;
+    if(chegaram>0&&chegaram===totalPend){
+      r.alerta='MERCADORIA NO CD — EM CONFERÊNCIA/LIBERAÇÃO'+(r.pendChegadaStr?' ('+r.pendChegadaStr+')':'');
+    } else if(semNf===0){
       r.alerta=comAgenda===totalPend?'NF EMITIDA — AGENDADA':'NF EMITIDA — AGUARDANDO AGENDA';
     } else if(comNf===0){
       r.alerta='SEM NF — COBRAR FORNECEDOR';
+    } else if(chegaram>0){
+      r.alerta=`PARCIAL — ${chegaram} no CD (conferência), ${comNf-chegaram} c/ NF, ${semNf} sem NF`;
     } else {
       r.alerta=`PARCIAL — ${comNf} NF(s) emitida(s), ${semNf} pendente(s) sem NF`;
     }
   } else {
     r.pendAgendaStr='';r.pendNfStr='';r.pendEmissaoStr='';r.pendQtdTotal=null;r.pendSemNf=0;r.pendComNfSemAg=0;r.pendNoCd=false;
+    r.pendChegaramCd=0;r.pendChegouCd=false;r.pendChegouCdLabel='NÃO';r.pendChegadaStr='';r.pendRomaneioStr='';
   }
 
   // ---- fechamento semanal (SQL) — fonte principal de lojas/cobertura ----
@@ -1469,6 +1503,8 @@ const COLS={
     {k:'agendaVencida',l:'Agenda vencida',badge:'sqlsimnao'},
     {k:'nf',l:'NF'},{k:'emissaoNf',l:'Emissão NF'},
     {k:'pendNfStr',l:'NFs (pendências)'},{k:'pendSemNf',l:'Pend. sem NF',num:true},
+    {k:'pendChegouCdLabel',l:'Chegou no CD?',badge:'sqlsimnao'},
+    {k:'pendChegadaStr',l:'Data chegada CD'},{k:'pendRomaneioStr',l:'Romaneio'},
     {k:'alerta',l:'Alerta NF/agenda'},
     {k:'pct_falta',l:'% Falta lojas',pct:true},
     {k:'lf',l:'Lojas falta (SQL)',num:true},{k:'mix',l:'Lojas mix (SQL)',num:true},
@@ -1490,6 +1526,8 @@ const COLS={
     {k:'agendaVencida',l:'Agenda vencida',badge:'sqlsimnao'},
     {k:'nf',l:'NF'},{k:'emissaoNf',l:'Emissão NF'},
     {k:'pendNfStr',l:'NFs (pendências)'},{k:'pendSemNf',l:'Pend. sem NF',num:true},
+    {k:'pendChegouCdLabel',l:'Chegou no CD?',badge:'sqlsimnao'},
+    {k:'pendChegadaStr',l:'Data chegada CD'},{k:'pendRomaneioStr',l:'Romaneio'},
     {k:'alerta',l:'Alerta NF/agenda'},
     {k:'venda',l:'Venda',num:true},
     {k:'venda_exp',l:'Venda exposta',num:true},
@@ -1506,6 +1544,8 @@ const COLS={
     {k:'dataAgend',l:'Data agenda'},{k:'agendaVencida',l:'Agenda vencida',badge:'sqlsimnao'},
     {k:'nf',l:'NF'},{k:'emissaoNf',l:'Emissão NF'},
     {k:'pendNfStr',l:'NFs (pendências)'},{k:'pendSemNf',l:'Pend. sem NF',num:true},
+    {k:'pendChegouCdLabel',l:'Chegou no CD?',badge:'sqlsimnao'},
+    {k:'pendChegadaStr',l:'Data chegada CD'},{k:'pendRomaneioStr',l:'Romaneio'},
     {k:'alerta',l:'Alerta NF/agenda'},
     {k:'pct_falta',l:'% Falta lojas',pct:true},{k:'lf',l:'Lojas falta',num:true},
     {k:'pct_rede',l:'% Falta rede',pct:true},{k:'venda',l:'Venda',num:true},
@@ -1536,7 +1576,10 @@ const COLS={
     {k:'dataAgend',l:'Data agenda'},{k:'pendAgendaStr',l:'Agenda (pendências)'},
     {k:'agendaVencida',l:'Vencida?',badge:'sqlsimnao'},
     {k:'pendNfStr',l:'NFs (pendências)'},{k:'pendSemNf',l:'Pend. sem NF',num:true},
-    {k:'nf',l:'NF (DEF)'},{k:'emissaoNf',l:'Emissão NF'},{k:'alerta',l:'Alerta NF/agenda'},
+    {k:'nf',l:'NF (DEF)'},{k:'emissaoNf',l:'Emissão NF'},
+    {k:'pendChegouCdLabel',l:'Chegou no CD?',badge:'sqlsimnao'},
+    {k:'pendChegadaStr',l:'Data chegada CD'},{k:'pendRomaneioStr',l:'Romaneio'},
+    {k:'alerta',l:'Alerta NF/agenda'},
     {k:'sql_cobCd',l:'Cob. CD dias',num:true},
     {k:'sql_cobCdPend',l:'Cob. CD+pend. dias',num:true},
     {k:'pct_falta',l:'% Falta lojas',pct:true},{k:'lf',l:'Lojas falta',num:true},
