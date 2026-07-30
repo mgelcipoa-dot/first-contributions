@@ -829,6 +829,10 @@ function classify(r,p){
   const foto=DATA.foto[r.key]||{};
   r.foto_status=foto.status??null;r.foto_disp=foto.qtd_disp??null;r.foto_pct_falta=foto.pct_falta??null;
   r.grupoOrForn=r.grupo||r.forn;
+  // preserva o valor original do arquivo DEF, usado só na aba Validação SQL para
+  // comparação lado a lado — em todo o resto do dash, "% falta varejo" passa a ser
+  // exclusividade do fechamento semanal (SQL), fonte única de verdade
+  r.pct_falta_def=r.pct_falta;
   r.dataAgendDate=parseAgendaDate(r.dataAgend);
   r.agendaVencida=r.dataAgendDate?(r.dataAgendDate<new Date(new Date().setHours(0,0,0,0))?'SIM':'NÃO'):null;
 
@@ -916,6 +920,10 @@ function classify(r,p){
     // SQL como fonte primária de lojas/falta rede (prioridade sobre foto do dia)
     r.lf=r.sql_lojasFalta??foto.lojas_falta??null;
     r.mix=r.sql_lojasMix??foto.lojas_mix??null;
+    // "% falta varejo" passa a ser exclusividade do SQL em todo o dash — o valor do
+    // arquivo DEF (preservado em r.pct_falta_def) só é usado se o SQL não tiver o item
+    if(r.sql_pctFalta!==null)r.pct_falta=r.sql_pctFalta;
+    if(r.sql_pctFaltaAnt!==null)r.pct_falta_ant=r.sql_pctFaltaAnt;
   } else {
     r.sql_cobCd=null;r.sql_cobCdPend=null;r.sql_deficiente=null;r.sql_pctFalta=null;
     r.sql_lojasFalta=null;r.sql_lojasMix=null;r.sql_estoqueCd=null;r.sql_estoqueLojas=null;
@@ -953,7 +961,9 @@ function classify(r,p){
   else r.motivo=`NS ${(ns*100).toFixed(0)}% — monitorar${vf}`;
   // trend
   const prv=DATA.prv_map[r.key];
-  r.varFalta=prv&&r.pct_falta!==null&&prv.pct_falta!==null?r.pct_falta-prv.pct_falta:null;
+  // usa pct_falta/pct_falta_ant (já priorizados pelo SQL acima) para o delta,
+  // mantendo atual e anterior na mesma fonte
+  r.varFalta=r.pct_falta!==null&&r.pct_falta_ant!==null?r.pct_falta-r.pct_falta_ant:null;
   r.varPend=prv?r.pend-(prv.pend||0):null;
   r.varAg=prv?r.qtd_ag-(prv.qtd_ag||0):null;
   const thr=p.ppTrend;
@@ -1632,7 +1642,7 @@ const COLS={
   validacaoSql:[
     {k:'sku',l:'SKU',cls:'sku-cell'},{k:'desc',l:'Descrição',cls:'desc-cell'},
     {k:'grupoOrForn',l:'Grupo fornecedor'},{k:'cd',l:'CD',num:true},{k:'curva',l:'Curva'},
-    {k:'problema',l:'Problema (arquivo DEF)'},{k:'pct_falta',l:'% Falta varejo (DEF)',pct:true},
+    {k:'problema',l:'Problema (arquivo DEF)'},{k:'pct_falta_def',l:'% Falta varejo (DEF)',pct:true},
     {k:'sql_cobCd',l:'Cobertura no CD (SQL)',num:true},
     {k:'sql_deficiente_label',l:'Deficiente (SQL)',badge:'sqlsimnao'},
     {k:'sql_pctFalta',l:'% Falta varejo (SQL)',pct:true},
